@@ -1,0 +1,290 @@
+//1. Arduino Uno (Smaller Microcontroller can aslo be used)
+//2.Joystick Module
+//3.0.96 inch oled display
+
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include <Adafruit_SSD1306.h>
+
+#define SCREEN_WIDTH 128
+#define SCREEN_HEIGHT 64
+
+#define OLED_RESET -1
+Adafruit_SSD1306 oled(SCREEN_WIDTH, SCREEN_HEIGHT, &Wire, OLED_RESET);
+const int buttonPin = A2;
+const int joyXPin = A0;
+const int joyYPin = A1;
+
+int buttonState = 0;
+int lastButtonState = 0;
+int gameSelected = 0; // 0 for Snake, 1 for Runner
+
+// Define directional constants
+#define RIGHT 0
+#define LEFT  1
+#define UP    2
+#define DOWN  3
+
+// Snake game variables
+const uint8_t block[] PROGMEM = {
+  0xf0, //B11110000
+  0xb0, //B10110000
+  0xd0, //B11010000
+  0xf0, //B11110000
+};
+
+uint8_t snake_head_x = 4;
+uint8_t snake_head_y = 4;
+uint8_t x[100];
+uint8_t y[100];
+uint8_t snake_len = 2;
+uint8_t snake_dir = RIGHT;
+
+uint8_t food_x;
+uint8_t food_y;
+bool food_eaten = true;
+
+bool game_over = false;
+int score = 0;
+int level = 1;
+int snake_speed = 150;
+int i;
+
+void setup() {
+  pinMode(buttonPin, INPUT);
+  digitalWrite(buttonPin, HIGH); // Enable internal pull-up resistor
+  oled.begin(SSD1306_SWITCHCAPVCC, 0x3C); // Initialize with I2C address 0x3C
+  oled.display();
+  delay(1000);
+  oled.clearDisplay();
+}
+
+void loop() {
+  oled.clearDisplay();
+
+  // Display menu
+  oled.setTextSize(1);
+  oled.setTextColor(SSD1306_WHITE);
+  oled.setCursor(0, 0);
+  oled.println("Select Game:");
+
+  if (gameSelected == 0) {
+    oled.setTextColor(SSD1306_WHITE, SSD1306_BLACK);
+    oled.setCursor(0, 10);
+    oled.println("> Runner");
+    oled.setTextColor(SSD1306_BLACK, SSD1306_WHITE);
+    oled.setCursor(0, 20);
+    oled.println("  Snake");
+  } else {
+    oled.setTextColor(SSD1306_WHITE, SSD1306_BLACK);
+    oled.setCursor(0, 20);
+    oled.println("> Snake");
+    oled.setTextColor(SSD1306_BLACK, SSD1306_WHITE);
+    oled.setCursor(0, 10);
+    oled.println("  Runner");
+  }
+
+  oled.display();
+
+  // Read joystick and button input
+  int xAxis = analogRead(joyXPin);
+  int yAxis = analogRead(joyYPin);
+  buttonState = digitalRead(buttonPin);
+
+  // Check for button press to select game
+  if (buttonState != lastButtonState) {
+    if (buttonState == LOW) {
+      if (gameSelected == 0) {
+        // Start Snake game
+        startSnakeGame();
+      } else {
+        // Start Runner game
+        startRunnerGame();
+      }
+    }
+    lastButtonState = buttonState;
+  }
+
+  // Check for joystick movement to change selection
+  if (xAxis < 100) {
+    gameSelected = 0; // Select Snake
+  } else if (xAxis > 900) {
+    gameSelected = 1; // Select Runner
+  }
+
+  delay(100);
+}
+
+void startSnakeGame() {
+  // Initialize Snake game
+  resetGame();
+
+  while (!game_over) {
+    keyScan();
+    snake_move();
+    draw_food();
+    screen();
+    delay(snake_speed);
+  }
+
+  // Display game over screen
+  drawGameOver();
+}
+
+void startRunnerGame() {
+  // Add your code to start Runner game here
+}
+
+void resetGame() {
+  game_over = false;
+  score = 0;
+  level = 1;
+  snake_speed = 150;
+  snake_len = 2;
+  snake_dir = RIGHT;
+  snake_head_x = 4;
+  snake_head_y = 4;
+}
+
+void keyScan(void) {
+  static unsigned char keyUp = 1;
+  int valueX = analogRead(joyXPin);
+  int valueY = analogRead(joyYPin);
+
+  if (keyUp && ((valueX <= 10) || (valueX >= 1010) || (valueY <= 10) || (valueY >= 1010))) {
+    delay(10);
+    keyUp = 0;
+    if (valueX <= 10) {
+      if (snake_dir != UP) {
+        snake_dir = DOWN;
+      }
+    } else if (valueX >= 1010) {
+      if (snake_dir != DOWN) {
+        snake_dir = UP;
+      }
+    } else if (valueY <= 10) {
+      if (snake_dir != RIGHT) {
+        snake_dir = LEFT;
+      }
+    } else if (valueY >= 1010) {
+      if (snake_dir != LEFT) {
+        snake_dir = RIGHT;
+      }
+    }
+  } else if ((valueX > 10) && (valueX < 1010) && (valueY > 10) && (valueY < 1010)) keyUp = 1;
+}
+
+void draw_snake(int x, int y) {
+  oled.drawBitmap(x, y, block, 4, 4, 1);
+}
+
+void show_score(int x, int y, int data) {
+  oled.setCursor(x, y);
+  oled.println(data);
+}
+
+void screen(void) {
+  oled.clearDisplay();
+  oled.setTextSize(1);
+  oled.drawRect(0, 1, 102, 62, 1);
+  oled.drawRect(0, 0, 102, 64, 1);
+  oled.setCursor(104, 12);
+  oled.println("LEVEL");
+  oled.setCursor(104, 40);
+  oled.println("SCORE");
+
+  show_score(110, 25, level);
+  show_score(110, 53, score);
+
+  for (i = 0; i < snake_len; i++) {
+    draw_snake(x[i], y[i]);
+  }
+
+  draw_snake(food_x, food_y);
+
+  oled.display();
+}
+
+void draw_food(void) {
+  int food_out = 0;
+
+  if (food_eaten) {
+    while (food_out == 0) {
+      food_out = 1;
+      food_x = (uint8_t)(random(4, 100) / 4) * 4;
+      food_y = (uint8_t)(random(4, 60) / 4) * 4;
+
+      for (int i = snake_len - 1; i > 0; i--) {
+        if (food_x == x[i] && food_y == y[i]) {
+          food_out = 0;
+        }
+      }
+    }
+  }
+
+   food_eaten = false;
+}
+
+void drawGameOver() {
+  oled.clearDisplay();
+  oled.setTextSize(2);
+  oled.setTextColor(SSD1306_WHITE);
+  oled.setCursor(10, 10);
+  oled.println("GAME OVER");
+  oled.setTextSize(1);
+  oled.setCursor(30, 35);
+  oled.print("LEVEL: ");
+  oled.println(level);
+  oled.setCursor(30, 55);
+  oled.print("SCORE: ");
+  oled.println(score);
+  oled.display();
+}
+
+void snake_move() {
+  switch (snake_dir) {
+    case RIGHT:
+      snake_head_x += 4;
+      break;
+    case LEFT:
+      snake_head_x -= 4;
+      break;
+    case UP:
+      snake_head_y -= 4;
+      break;
+    case DOWN:
+      snake_head_y += 4;
+      break;
+  }
+
+  // Check for collision with food
+  if (snake_head_x == food_x && snake_head_y == food_y) {
+    score += 10;
+    snake_len++;
+    food_eaten = true;
+    if (score % 100 == 0) {
+      level++;
+      if (snake_speed >= 50) {
+        snake_speed -= 10;
+      }
+    }
+  }
+
+  // Check for collision with walls or self
+  if (snake_head_x >= SCREEN_WIDTH || snake_head_x <= 0 || snake_head_y >= SCREEN_HEIGHT || snake_head_y <= 0) {
+    game_over = true;
+    return;
+  }
+
+  for (int i = snake_len - 1; i > 0; i--) {
+    x[i] = x[i - 1];
+    y[i] = y[i - 1];
+    if (snake_head_x == x[i] && snake_head_y == y[i]) {
+      game_over = true;
+      return;
+    }
+  }
+
+  x[0] = snake_head_x;
+  y[0] = snake_head_y;
+}
